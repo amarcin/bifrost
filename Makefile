@@ -33,7 +33,50 @@ USE_NODE = NVM_SH="$${NVM_DIR:-$$HOME/.nvm}/nvm.sh"; \
 	[ -s "$$NVM_SH" ] || NVM_SH="$$(brew --prefix nvm 2>/dev/null)/nvm.sh"; \
 	if [ -s "$$NVM_SH" ]; then . "$$NVM_SH" >/dev/null && nvm install >/dev/null 2>&1 && nvm use >/dev/null 2>&1; fi
 
-.PHONY: all help dev dev-pulse build-ui build build-cli run run-cli install-air install-pulse clean test test-cli install-ui setup-workspace work-init work-clean docs docker-image docker-run cleanup-enterprise mod-tidy test-integrations-py test-integrations-ts install-playwright run-e2e run-e2e-ui run-e2e-headed format ui
+# Decides how to expose secrets to a recipe. Set via:
+#   INFISICAL=1         -> always wrap commands with `infisical run --path <p> --` (non-interactive)
+#   INFISICAL=0         -> always source ./.env (non-interactive)
+#   INFISICAL_PATH=/x   -> override the Infisical secret path (default /local)
+#   unset + tty         -> prompt the user
+#   unset + CI          -> default to dotenv silently
+# After invoking `$(EXPOSE_ENV);`, prefix each command with `$$CMD_PREFIX` so it inherits the chosen secrets.
+# Use as: `$(EXPOSE_ENV); $$CMD_PREFIX <your command>`
+define EXPOSE_ENV
+	if [ -n "$$INFISICAL" ]; then \
+		case "$$INFISICAL" in \
+			1|y|Y|yes|YES|true|TRUE) USE_INFISICAL=1 ;; \
+			*) USE_INFISICAL=0 ;; \
+		esac; \
+	elif [ -t 0 ]; then \
+		printf "$(CYAN)Use Infisical to expose secrets to this run? [y/N] $(NC)"; \
+		read ENV_ANSWER; \
+		case "$$ENV_ANSWER" in \
+			y|Y|yes|YES) USE_INFISICAL=1 ;; \
+			*) USE_INFISICAL=0 ;; \
+		esac; \
+	else \
+		USE_INFISICAL=0; \
+	fi; \
+	if [ "$$USE_INFISICAL" = "1" ]; then \
+		if ! which infisical > /dev/null 2>&1; then \
+			$(ECHO) "$(RED)infisical CLI not found. Install: https://infisical.com/docs/cli/overview$(NC)"; \
+			exit 1; \
+		fi; \
+		INFISICAL_PATH_VAL="$${INFISICAL_PATH:-/local}"; \
+		$(ECHO) "$(GREEN)Secrets via Infisical (path=$$INFISICAL_PATH_VAL)$(NC)"; \
+		CMD_PREFIX="infisical run --path $$INFISICAL_PATH_VAL --"; \
+	else \
+		if [ -f .env ]; then \
+			$(ECHO) "$(YELLOW)Loading environment variables from .env...$(NC)"; \
+			set -a; . ./.env; set +a; \
+		else \
+			$(ECHO) "$(YELLOW)No .env found - using current shell environment$(NC)"; \
+		fi; \
+		CMD_PREFIX=""; \
+	fi
+endef
+
+.PHONY: all help dev dev-pulse build-ui build build-cli run run-cli install-air install-pulse clean test test-cli install-ui setup-workspace work-init work-clean docs docker-image docker-run cleanup-enterprise mod-tidy test-integrations-py test-integrations-ts install-playwright run-e2e run-e2e-ui run-e2e-headed format ui install-newman run-provider-harness-test
 
 all: help
 
@@ -1484,3 +1527,96 @@ test-cli: install-gotestsum ## Run CLI tests
 		--format=$(GOTESTSUM_FORMAT) \
 		--junitfile=../$(TEST_REPORTS_DIR)/cli.xml \
 		-- ./...
+
+install-newman: ## Install newman + htmlextra reporter if not already installed
+	@$(USE_NODE); which newman > /dev/null 2>&1 || ($(ECHO) "$(YELLOW)Installing newman...$(NC)" && npm install -g newman)
+	@$(USE_NODE); npm list -g newman-reporter-htmlextra > /dev/null 2>&1 || ($(ECHO) "$(YELLOW)Installing newman-reporter-htmlextra...$(NC)" && npm install -g newman-reporter-htmlextra)
+	@$(ECHO) "$(GREEN)Newman + htmlextra are ready$(NC)"
+
+run-provider-harness-test: install-newman ## Run the Bifrost provider-harness Postman collection via newman, opens an interactive HTML viewer with resend support afterwards. Set CI=1 to skip the viewer and just emit tmp/newman-report.html as a CI artifact. Prompts for Infisical-vs-.env (Usage: make run-provider-harness-test [BASE_URL=...] [APP_DIR=...] [FOLDER="..."] [ENV_FILE=...] [INFISICAL=1|0] [INFISICAL_PATH=/local] [VIEWER_PORT=8090] [CI=1])
+	@mkdir -p tmp
+	@$(EXPOSE_ENV); \
+	BASE_URL_VAL="$(or $(BASE_URL),http://localhost:8080)"; \
+	APP_DIR_VAL="$(or $(APP_DIR),tests/integrations/python)"; \
+	VIEWER_PORT_VAL="$(or $(VIEWER_PORT),8090)"; \
+	STARTED_BY_US=0; \
+	cleanup() { \
+		if [ -f tmp/harness-viewer.pid ]; then \
+			VPID=$$(cat tmp/harness-viewer.pid); \
+			kill $$VPID 2>/dev/null; \
+			rm -f tmp/harness-viewer.pid; \
+		fi; \
+		if [ "$$STARTED_BY_US" = "1" ] && [ -f tmp/bifrost-dev.pid ]; then \
+			BPID=$$(cat tmp/bifrost-dev.pid); \
+			$(ECHO) "$(YELLOW)Stopping Bifrost (pid $$BPID) - we started it...$(NC)"; \
+			kill $$BPID 2>/dev/null; \
+			pkill -P $$BPID 2>/dev/null; \
+			rm -f tmp/bifrost-dev.pid; \
+		fi; \
+	}; \
+	preempt_viewer_port() { \
+		if [ -f tmp/harness-viewer.pid ]; then \
+			OLD=$$(cat tmp/harness-viewer.pid); \
+			if kill -0 $$OLD 2>/dev/null; then \
+				$(ECHO) "$(YELLOW)Killing orphaned viewer pid $$OLD from a prior run...$(NC)"; \
+				kill $$OLD 2>/dev/null; sleep 1; \
+			fi; \
+			rm -f tmp/harness-viewer.pid; \
+		fi; \
+		pkill -f "tests/e2e/api/runners/harness-viewer.mjs" 2>/dev/null || true; \
+		if command -v lsof > /dev/null 2>&1 && lsof -ti tcp:$$VIEWER_PORT_VAL > /dev/null 2>&1; then \
+			$(ECHO) "$(YELLOW)Port $$VIEWER_PORT_VAL still in use - freeing it...$(NC)"; \
+			lsof -ti tcp:$$VIEWER_PORT_VAL | xargs kill 2>/dev/null || true; \
+			sleep 1; \
+		fi; \
+	}; \
+	trap cleanup EXIT INT TERM HUP; \
+	if curl -fsS --max-time 2 "$$BASE_URL_VAL/health" > /dev/null 2>&1; then \
+		$(ECHO) "$(GREEN)Bifrost already running at $$BASE_URL_VAL$(NC)"; \
+	else \
+		$(ECHO) "$(YELLOW)Bifrost not running - launching 'make dev' (APP_DIR=$$APP_DIR_VAL) in background...$(NC)"; \
+		$$CMD_PREFIX $(MAKE) dev APP_DIR="$$APP_DIR_VAL" > tmp/bifrost-dev.log 2>&1 & \
+		echo $$! > tmp/bifrost-dev.pid; \
+		STARTED_BY_US=1; \
+		$(ECHO) "$(CYAN)Waiting for Bifrost /health to respond (up to 60s)...$(NC)"; \
+		for i in $$(seq 1 30); do \
+			if curl -fsS --max-time 2 "$$BASE_URL_VAL/health" > /dev/null 2>&1; then \
+				$(ECHO) "$(GREEN)Bifrost is up$(NC)"; break; \
+			fi; \
+			sleep 2; \
+		done; \
+		if ! curl -fsS --max-time 2 "$$BASE_URL_VAL/health" > /dev/null 2>&1; then \
+			$(ECHO) "$(RED)Bifrost did not become healthy. See tmp/bifrost-dev.log$(NC)"; \
+			exit 1; \
+		fi; \
+	fi; \
+	$(ECHO) "$(YELLOW)Running Postman collection via newman against $$BASE_URL_VAL...$(NC)"; \
+	$(USE_NODE); $$CMD_PREFIX newman run tests/e2e/api/collections/provider-harness.json \
+		--env-var "baseUrl=$$BASE_URL_VAL" \
+		$(if $(ENV_FILE),--environment $(ENV_FILE),) \
+		$(if $(FOLDER),--folder "$(FOLDER)",) \
+		--reporters cli,json,htmlextra \
+		--reporter-json-export tmp/newman-report.json \
+		--reporter-htmlextra-export tmp/newman-report.html \
+		--reporter-htmlextra-title "Bifrost Provider Harness" \
+		--reporter-htmlextra-darkTheme; \
+	NEWMAN_EXIT=$$?; \
+	$(ECHO) "$(GREEN)Newman finished. Reports: tmp/newman-report.json + tmp/newman-report.html$(NC)"; \
+	if [ -n "$(CI)" ] || [ -n "$$CI" ]; then \
+		$(ECHO) "$(CYAN)CI mode - skipping interactive viewer. Upload tmp/newman-report.html as a workflow artifact.$(NC)"; \
+	else \
+		preempt_viewer_port; \
+		$(ECHO) "$(CYAN)Launching interactive viewer on http://localhost:$$VIEWER_PORT_VAL (Bifrost stays up for resend)...$(NC)"; \
+		$(USE_NODE); node tests/e2e/api/runners/harness-viewer.mjs --report tmp/newman-report.json --port $$VIEWER_PORT_VAL & \
+		VIEWER_PID=$$!; \
+		echo $$VIEWER_PID > tmp/harness-viewer.pid; \
+		wait $$VIEWER_PID; \
+		VIEWER_EXIT=$$?; \
+		rm -f tmp/harness-viewer.pid; \
+		if [ $$VIEWER_EXIT -ne 0 ]; then \
+			$(ECHO) "$(RED)Viewer exited with code $$VIEWER_EXIT (see message above).$(NC)"; \
+		else \
+			$(ECHO) "$(GREEN)Viewer closed.$(NC)"; \
+		fi; \
+	fi; \
+	exit $$NEWMAN_EXIT

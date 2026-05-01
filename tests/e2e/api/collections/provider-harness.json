@@ -1,0 +1,329 @@
+{
+  "info": {
+    "_postman_id": "bifrost-provider-harness-2026-05",
+    "name": "Bifrost Provider Harness",
+    "description": "Smoke-test harness exercising every Bifrost provider surface.\n\nCovers:\n1. Native Bifrost API (`/v1/chat/completions`, `/v1/responses`).\n2. Drop-in integrations: `/openai`, `/anthropic`, `/bedrock`, `/genai`, plus Azure (via `/openai/openai/deployments/...`) and Vertex (via `/genai`).\n3. Cross-Model harness: a single endpoint (`POST /v1/chat/completions`) called with 10 latest-generation models per provider, demonstrating Bifrost's `provider/model` unified-routing format across OpenAI, Anthropic, Bedrock, Gemini, and Vertex.\n\nSet the `baseUrl` and provider key variables before running. Run end-to-end with `make run-provider-harness-test` from the repo root.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('Status code is 2xx', function () {",
+          "    pm.expect(pm.response.code, 'expected a 2xx response, got ' + pm.response.code).to.be.below(400);",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "openaiKey", "value": "sk-replace-me", "type": "string" },
+    { "key": "anthropicKey", "value": "sk-ant-replace-me", "type": "string" },
+    { "key": "genaiKey", "value": "AIza-replace-me", "type": "string" },
+    { "key": "bedrockModel", "value": "anthropic.claude-opus-4-7-v1:0", "type": "string" },
+    { "key": "azureDeployment", "value": "gpt-4o", "type": "string" },
+    { "key": "azureApiVersion", "value": "2024-10-21", "type": "string" },
+    { "key": "genaiModel", "value": "gemini-2.5-pro", "type": "string" },
+    { "key": "vertexModel", "value": "gemini-2.5-pro", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Native Bifrost API",
+      "description": "Bifrost's own OpenAI-shaped surface. Use a `provider/model` string in the `model` field to route to any configured backend.",
+      "item": [
+        {
+          "name": "POST /v1/chat/completions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"openai/gpt-4o-mini\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Say hello in one short sentence.\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/chat/completions",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "chat", "completions"]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/responses",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"openai/gpt-4o-mini\",\n  \"input\": \"Say hello in one short sentence.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/responses",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "responses"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. OpenAI drop-in (/openai)",
+      "description": "Mirrors the OpenAI HTTP surface. Existing OpenAI SDKs work by pointing `base_url` at `{{baseUrl}}/openai`.",
+      "item": [
+        {
+          "name": "POST /openai/v1/chat/completions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{openaiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Hello from OpenAI drop-in.\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/openai/v1/chat/completions",
+              "host": ["{{baseUrl}}"],
+              "path": ["openai", "v1", "chat", "completions"]
+            }
+          }
+        },
+        {
+          "name": "POST /openai/v1/responses",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{openaiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"gpt-4o-mini\",\n  \"input\": \"Hello from OpenAI Responses API.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/openai/v1/responses",
+              "host": ["{{baseUrl}}"],
+              "path": ["openai", "v1", "responses"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Anthropic drop-in (/anthropic)",
+      "description": "Mirrors the Anthropic Messages API. Use `x-api-key` and `anthropic-version` headers as you would against api.anthropic.com.",
+      "item": [
+        {
+          "name": "POST /anthropic/v1/messages",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-api-key", "value": "{{anthropicKey}}" },
+              { "key": "anthropic-version", "value": "2023-06-01" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"claude-opus-4-7\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Hello from Anthropic drop-in.\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/anthropic/v1/messages",
+              "host": ["{{baseUrl}}"],
+              "path": ["anthropic", "v1", "messages"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Bedrock drop-in (/bedrock)",
+      "description": "Mirrors AWS Bedrock's Converse API. Auth/credentials are resolved by Bifrost from its provider config (or IAM/env if Bedrock provider config is nil).",
+      "item": [
+        {
+          "name": "POST /bedrock/model/{modelId}/converse",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [{ \"text\": \"Hello from Bedrock Converse.\" }]\n    }\n  ],\n  \"inferenceConfig\": {\n    \"maxTokens\": 1024\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bedrock/model/{{bedrockModel}}/converse",
+              "host": ["{{baseUrl}}"],
+              "path": ["bedrock", "model", "{{bedrockModel}}", "converse"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Azure (via /openai deployments)",
+      "description": "Azure OpenAI has no separate top-level route - it's served by the OpenAI integration with the deployment-style path. Replace `{{azureDeployment}}` with the deployment name configured in your Azure resource.",
+      "item": [
+        {
+          "name": "POST /openai/openai/deployments/{deployment}/chat/completions",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "api-key", "value": "{{openaiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"Hello from Azure deployment.\" }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/openai/openai/deployments/{{azureDeployment}}/chat/completions?api-version={{azureApiVersion}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["openai", "openai", "deployments", "{{azureDeployment}}", "chat", "completions"],
+              "query": [
+                { "key": "api-version", "value": "{{azureApiVersion}}" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Google GenAI drop-in (/genai)",
+      "description": "Mirrors Google GenAI's `generateContent` API. Send the model + action via the `:generateContent` suffix on the path.",
+      "item": [
+        {
+          "name": "POST /genai/v1beta/models/{model}:generateContent",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-goog-api-key", "value": "{{genaiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contents\": [\n    {\n      \"parts\": [{ \"text\": \"Hello from GenAI generateContent.\" }]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/genai/v1beta/models/{{genaiModel}}:generateContent",
+              "host": ["{{baseUrl}}"],
+              "path": ["genai", "v1beta", "models", "{{genaiModel}}:generateContent"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Vertex (via /genai)",
+      "description": "Bifrost surfaces Vertex AI through the same GenAI router; use a Vertex-style model identifier (or rely on Bifrost's provider routing in your config) and the `generateContent` path.",
+      "item": [
+        {
+          "name": "POST /genai/v1beta/models/{vertexModel}:generateContent",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-goog-api-key", "value": "{{genaiKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contents\": [\n    {\n      \"parts\": [{ \"text\": \"Hello from Vertex via GenAI.\" }]\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/genai/v1beta/models/{{vertexModel}}:generateContent",
+              "host": ["{{baseUrl}}"],
+              "path": ["genai", "v1beta", "models", "{{vertexModel}}:generateContent"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Cross-Model (unified /v1/chat/completions, 10 per provider)",
+      "description": "The headline demo: one endpoint, one request shape, only the `model` field varies. Bifrost's `ParseModelString` (core/schemas/utils.go) splits `provider/model-name` and dispatches to the right backend.\n\n5 providers x 10 models = 50 requests (Azure intentionally skipped).",
+      "item": [
+        {
+          "name": "OpenAI (10 latest)",
+          "item": [
+            { "name": "openai/gpt-5",                "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-5\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-5-mini",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-5-mini\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-5-nano",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-5-nano\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-4.1",              "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-4.1\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-4.1-mini",         "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-4.1-mini\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-4.1-nano",         "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-4.1-nano\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-4o",               "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-4o\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/gpt-4o-mini",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/gpt-4o-mini\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/o3",                   "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/o3\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "openai/o3-mini",              "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"openai/o3-mini\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } }
+          ]
+        },
+        {
+          "name": "Anthropic (10 latest)",
+          "item": [
+            { "name": "anthropic/claude-opus-4-7",                 "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-opus-4-7\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-sonnet-4-6",               "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-sonnet-4-6\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-haiku-4-5",                "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-haiku-4-5\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-opus-4-5",                 "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-opus-4-5\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-sonnet-4-5",               "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-sonnet-4-5\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-haiku-4-0",                "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-haiku-4-0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-opus-4-0",                 "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-opus-4-0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-sonnet-4-0",               "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-sonnet-4-0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-3-7-sonnet-20250219",      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-3-7-sonnet-20250219\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "anthropic/claude-3-5-sonnet-20241022",      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"anthropic/claude-3-5-sonnet-20241022\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } }
+          ]
+        },
+        {
+          "name": "Bedrock (10 latest)",
+          "item": [
+            { "name": "bedrock/anthropic.claude-opus-4-7-v1:0",            "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/anthropic.claude-opus-4-7-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/anthropic.claude-sonnet-4-6-v1:0",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/anthropic.claude-sonnet-4-6-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/anthropic.claude-haiku-4-5-v1:0",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/anthropic.claude-haiku-4-5-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/anthropic.claude-3-7-sonnet-20250219-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/amazon.nova-pro-v1:0",                      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/amazon.nova-pro-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/amazon.nova-lite-v1:0",                     "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/amazon.nova-lite-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/amazon.nova-micro-v1:0",                    "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/amazon.nova-micro-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/meta.llama3-1-70b-instruct-v1:0",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/meta.llama3-1-70b-instruct-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "bedrock/mistral.mistral-large-2407-v1:0",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"bedrock/mistral.mistral-large-2407-v1:0\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } }
+          ]
+        },
+        {
+          "name": "Gemini / GenAI (10 latest)",
+          "item": [
+            { "name": "gemini/gemini-2.5-pro",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.5-pro\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-2.5-flash",        "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.5-flash\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-2.5-flash-lite",   "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.5-flash-lite\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-2.0-pro",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.0-pro\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-2.0-flash",        "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.0-flash\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-2.0-flash-lite",   "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-2.0-flash-lite\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-1.5-pro-latest",   "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-1.5-pro-latest\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-1.5-flash-latest", "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-1.5-flash-latest\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-1.5-flash-8b",     "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-1.5-flash-8b\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "gemini/gemini-exp-1206",         "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"gemini/gemini-exp-1206\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } }
+          ]
+        },
+        {
+          "name": "Vertex (10 latest)",
+          "item": [
+            { "name": "vertex/gemini-2.5-pro",                      "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/gemini-2.5-pro\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/gemini-2.5-flash",                    "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/gemini-2.5-flash\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/gemini-2.0-flash",                    "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/gemini-2.0-flash\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/claude-opus-4-7@20260321",            "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/claude-opus-4-7@20260321\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/claude-sonnet-4-6@20260101",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/claude-sonnet-4-6@20260101\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/claude-haiku-4-5@20251201",           "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/claude-haiku-4-5@20251201\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/claude-3-7-sonnet@20250219",          "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/claude-3-7-sonnet@20250219\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/claude-3-5-sonnet-v2@20241022",       "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/claude-3-5-sonnet-v2@20241022\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/llama-4-maverick-17b",                "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/llama-4-maverick-17b\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } },
+            { "name": "vertex/mistral-large-2411",                  "request": { "method": "POST", "header": [{ "key": "Content-Type", "value": "application/json" }], "body": { "mode": "raw", "raw": "{\n  \"model\": \"vertex/mistral-large-2411\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Hello\" }]\n}" }, "url": { "raw": "{{baseUrl}}/v1/chat/completions", "host": ["{{baseUrl}}"], "path": ["v1", "chat", "completions"] } } }
+          ]
+        }
+      ]
+    }
+  ]
+}
